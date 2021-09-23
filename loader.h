@@ -30,10 +30,12 @@ char *gotpltAddr = NULL;
 size_t *rtld_ro = NULL;
 
 void *dl_fixup(void *ptr, int index) {
+    // printf("index: %p\n", index);
+    size_t *addr = (size_t *)gotpltAddr;
     for(int i = 0; i < handleNum; i++) {
         size_t func = (size_t)dlsym(handles[i], importedFunctions[index]);
         if(func) {
-            *(size_t *)(gotpltAddr + (index + 3) * 8) = func;
+            gotpltAddr[index + 3] = func;
             return (void *)func;
         }
     }
@@ -181,7 +183,7 @@ char *LoadELF(char *image, size_t baseaddr, size_t *retSize, char *libpath[], si
     Elf64_Sym *dynSymIter = dynSym;
     for(int i = 0; i < dynSymNum; i++) {
         char *imported = dynstr + dynSymIter->st_name;
-        if ((dynSymIter->st_info & STT_FUNC) && dynSymIter->st_value == 0) {
+        if ((dynSymIter->st_info & STT_FUNC) && dynSymIter->st_shndx == 0) {
             importedFunctionNum++;
         }
         dynSymIter++;
@@ -192,7 +194,7 @@ char *LoadELF(char *image, size_t baseaddr, size_t *retSize, char *libpath[], si
     dynSymIter = dynSym;
     for(int i = 0, k = 0; i < dynSymNum; i++) {
         char *imported = dynstr + dynSymIter->st_name;
-        if ((dynSymIter->st_info & STT_FUNC) && dynSymIter->st_value == 0) {
+        if ((dynSymIter->st_info & STT_FUNC) && dynSymIter->st_shndx == 0) {
             importedFunctions[k] = malloc(strlen(imported) + 1);
             strcpy(importedFunctions[k++], imported);
         }
