@@ -31,7 +31,7 @@ size_t *rtld_ro = NULL;
 
 void *dl_fixup(void *ptr, int index) {
     for(int i = 0; i < handleNum; i++) {
-        size_t func = dlsym(handles[i], importedFunctions[index]);
+        size_t func = (size_t)dlsym(handles[i], importedFunctions[index]);
         if(func) {
             *(size_t *)(gotpltAddr + (index + 3) * 8) = func;
             return (void *)func;
