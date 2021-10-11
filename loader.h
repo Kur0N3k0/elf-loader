@@ -27,10 +27,8 @@ void **handles = NULL;
 size_t handleNum = 0;
 
 char *gotpltAddr = NULL;
-size_t *rtld_ro = NULL;
 
-void *dl_fixup(void *ptr, int index) {
-    // printf("index: %p\n", index);
+extern "C" void *dl_fixup(void *ptr, int index) {
     size_t *addr = (size_t *)gotpltAddr;
     for(int i = 0; i < handleNum; i++) {
         size_t func = (size_t)dlsym(handles[i], importedFunctions[index]);
@@ -39,10 +37,12 @@ void *dl_fixup(void *ptr, int index) {
             return (void *)func;
         }
     }
+    return NULL;
 }
 
 void __attribute__((naked)) LazyBinding() {
     asm volatile(
+        ".intel_syntax noprefix\n"
         "push   rbx\n"
         "mov    rbx,rsp\n"
         "and    rsp,0xffffffffffffffc0\n"
@@ -81,10 +81,13 @@ void __attribute__((naked)) LazyBinding() {
         "mov    rbx,QWORD PTR [rsp]\n"
         "add    rsp,0x18\n"
         "jmp    r11\n"
+        ".att_syntax prefix\n"
     );
 }
 
-char *LoadELF(char *image, size_t baseaddr, size_t *retSize, char *libpath[], size_t libpathSize) {
+char * LoadELF(char *image, size_t baseaddr, size_t *retSize, char *libpath[], size_t libpathSize) {
+    importedFunctionNum = handleNum = 0;
+
     int fd = open(image, O_RDONLY);
     struct stat st;
     stat(image, &st);
@@ -158,14 +161,14 @@ char *LoadELF(char *image, size_t baseaddr, size_t *retSize, char *libpath[], si
         dynIter++;
     }
 
-    handles = malloc(sizeof(size_t) * nodeSize);
+    handles = (void **)malloc(sizeof(size_t) * nodeSize);
     handleNum = nodeSize;
 
     Node *nodeIter = head;
     for(int p = 0; nodeIter != NULL; nodeIter = nodeIter->next, p++) {
         for(int i = 0; i < libpathSize; i++) {
             char *libname = dynstr + nodeIter->d_val;
-            char *ptr = malloc(strlen(libpath[i]) + strlen(libname) + 1);
+            char *ptr = (char *)malloc(strlen(libpath[i]) + strlen(libname) + 2);
             sprintf(ptr, "%s/%s", libpath[i], libname);
             
             struct stat st;
@@ -195,13 +198,13 @@ char *LoadELF(char *image, size_t baseaddr, size_t *retSize, char *libpath[], si
     for(int i = 0, k = 0; i < dynSymNum; i++) {
         char *imported = dynstr + dynSymIter->st_name;
         if ((dynSymIter->st_info & STT_FUNC) && dynSymIter->st_shndx == 0) {
-            importedFunctions[k] = malloc(strlen(imported) + 1);
+            importedFunctions[k] = (char *)malloc(strlen(imported) + 1);
             strcpy(importedFunctions[k++], imported);
         }
         dynSymIter++;
     }
 
-    char *virtImage = (char *)mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+    char *virtImage = (char *)mmap((void *)0x31337000, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
     for(int i = 0; i < ehdr->e_shnum; i++) {
         if(!sections[i].size || !sections[i].addr)
             continue;
@@ -221,8 +224,6 @@ char *LoadELF(char *image, size_t baseaddr, size_t *retSize, char *libpath[], si
         }
     }
 
-    rtld_ro = malloc(0x380);
-
     Node *fptr = head;
     
     for(Node *fptr = head; fptr != NULL;) {
@@ -231,8 +232,31 @@ char *LoadELF(char *image, size_t baseaddr, size_t *retSize, char *libpath[], si
         fptr = ptr;
     }
 
+    free(sections);
+
     munmap(elf, st.st_size);
     close(fd);
 
     return virtImage;
+}
+
+void finalize(char *image, size_t size) {
+    if(importedFunctions) {
+        for(int i = 0; i < importedFunctionNum; i++) {
+            if(importedFunctions[i]) {
+                free(importedFunctions[i]);
+            }
+        }
+        free(importedFunctions);
+    }
+    if(handles) {
+        for(int i = 0; i < handleNum; i++) {
+            dlclose(handles[i]);
+        }
+        free(handles);
+    }
+
+    if(image) {
+        munmap(image, size);
+    }
 }
