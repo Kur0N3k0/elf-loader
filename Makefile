@@ -1,11 +1,11 @@
 all: example
 
 example:
-	gcc -o example example.c -ldl -masm=intel
-	gcc -o test test.c -Wl,-z,norelro -no-pie
+	clang -fsanitize=address,fuzzer example.cpp -o fuzzer -g
+	gcc -o target target.c -no-pie
 
 test: example
-	./example ./test
+	./fuzzer ./target
 
 clean:
-	rm -rf ./example ./test
+	rm -rf ./fuzzer ./target
